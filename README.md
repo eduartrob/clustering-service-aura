@@ -1,101 +1,198 @@
-# AURA Clustering Service - Data Miner ETL
+# AURA Clustering Service - API Documentation
 
-API REST con FastAPI para análisis de riesgo emocional de usuarios mediante Machine Learning.
-
-## 🔐 Credenciales de Administrador
-
+## 🔐 Credenciales Admin
 ```
 Email:    admin@aura.com
 Usuario:  admin
 Password: pezcadofrito.1
 ```
 
+## 🌐 Puerto y Acceso
+```
+Puerto: 8001
+URL Base: http://<IP-EC2>:8001
+Swagger: http://<IP-EC2>:8001/docs
+```
+
+> **⚠️ Importante:** Abrir puerto 8001 en Security Groups de AWS EC2 (TCP Inbound)
+
 ---
 
-## 🚀 Quick Start (Docker)
+## 📊 API Endpoints para Admin Frontend
+
+### Base URL
+```
+http://<IP-EC2>:8001/api/v1
+```
+
+---
+
+## 1️⃣ ETL - Ejecutar Pipeline (Requisito Previo)
+
+### POST `/data-miner/execute-etl`
+Extrae datos de todas las DBs y genera vectores de características.
 
 ```bash
-# En EC2, después de clonar el repo
-cd ~/orchestration-service-aura
-git pull origin main
+curl -X POST "http://<IP>:8001/api/v1/data-miner/execute-etl?skip_nlp=false"
+```
 
-# Crear la base de datos (primera vez)
-docker exec -it aura_postgres psql -U postgres -c "CREATE DATABASE aura_data_miner;"
-
-# Build y levantar
-docker compose build clustering-service
-docker compose up -d clustering-service
-
-# Verificar
-curl http://localhost:8001/health
+**Response:**
+```json
+{
+  "status": "success",
+  "message": "Flujo ETL de Vectorización completado con éxito.",
+  "records_processed": 25,
+  "extraction_date": "2025-12-05T18:00:00Z",
+  "next_step": "La tabla 'user_feature_vector' está lista para el algoritmo de Clustering."
+}
 ```
 
 ---
 
-## 📚 Documentación Interactiva
+## 2️⃣ Clustering - Ejecutar Análisis
 
-| URL | Descripción |
-|-----|-------------|
-| http://localhost:8001/docs | **Swagger UI** (interactivo) |
-| http://localhost:8001/redoc | ReDoc (documentación) |
+### POST `/clustering/execute`
+Ejecuta K-Means, DBSCAN e Isolation Forest.
+
+```bash
+curl -X POST "http://<IP>:8001/api/v1/clustering/execute?n_clusters=4"
+```
+
+**Parámetros:**
+- `n_clusters` (int, default=4): Número de clusters
+- `contamination` (float, default=0.1): Proporción de anomalías
+
+**Response:**
+```json
+{
+  "status": "success",
+  "execution_date": "2025-12-05T18:05:00Z",
+  "total_users": 25,
+  "risk_distribution": {
+    "ALTO_RIESGO": 3,
+    "RIESGO_MODERADO": 7,
+    "BAJO_RIESGO": 15
+  },
+  "metrics": {
+    "silhouette_score": 0.45,
+    "calinski_harabasz": 120.5,
+    "high_risk_percentage": 12.0
+  }
+}
+```
 
 ---
 
-## 🎨 Endpoints de Visualización para Admin Frontend
+## 3️⃣ Visualizaciones (HTML/SVG)
 
-### Dashboard Completo
+### GET `/clustering/visualize/dashboard`
+Dashboard completo con todas las gráficas.
 ```
-GET /api/v1/clustering/visualize/dashboard
+http://<IP>:8001/api/v1/clustering/visualize/dashboard
 ```
-Retorna HTML con dashboard completo incluyendo:
-- Métricas generales (total usuarios, % alto riesgo, silhouette score)
-- Distribución de riesgo (gráfico de barras)
-- Proyección PCA (scatter plot)
-- Índice de severidad (histograma)
-- Perfil de clusters (radar chart)
+**Retorna:** HTML con CSS inline (puede embeberse en iframe)
 
-### Gráficos Individuales (SVG embebido en HTML)
-
-| Endpoint | Descripción | Uso |
-|----------|-------------|-----|
-| `GET /api/v1/clustering/visualize/scatter` | Scatter Plot PCA | Visualizar agrupamiento |
-| `GET /api/v1/clustering/visualize/distribution` | Distribución de riesgo | Barras por nivel |
-| `GET /api/v1/clustering/visualize/radar` | Radar Chart | Perfil KPIs por cluster |
-| `GET /api/v1/clustering/visualize/severity` | Histograma severidad | Distribución índice |
-| `GET /api/v1/clustering/visualize/kmeans` | Clusters K-Means | Visualización clusters |
-| `GET /api/v1/clustering/visualize/metrics` | Métricas resumen | Calidad del clustering |
-
-### Consulta de Usuarios
-
+### GET `/clustering/visualize/distribution`
+Gráfico de barras: Distribución de niveles de riesgo.
 ```
-GET /api/v1/clustering/users/{risk_level}
+http://<IP>:8001/api/v1/clustering/visualize/distribution
 ```
-Valores válidos: `ALTO_RIESGO`, `RIESGO_MODERADO`, `BAJO_RIESGO`
 
-**Respuesta:**
+### GET `/clustering/visualize/scatter`
+Scatter Plot PCA coloreado por nivel de riesgo.
+```
+http://<IP>:8001/api/v1/clustering/visualize/scatter
+```
+
+### GET `/clustering/visualize/radar`
+Radar Chart con perfil de KPIs por cluster.
+```
+http://<IP>:8001/api/v1/clustering/visualize/radar
+```
+
+### GET `/clustering/visualize/severity`
+Histograma de índice de severidad.
+```
+http://<IP>:8001/api/v1/clustering/visualize/severity
+```
+
+### GET `/clustering/visualize/kmeans`
+Visualización de clusters K-Means.
+```
+http://<IP>:8001/api/v1/clustering/visualize/kmeans
+```
+
+---
+
+## 4️⃣ Datos JSON para Frontend Personalizado
+
+### GET `/clustering/results`
+Métricas del último clustering.
+
+```bash
+curl "http://<IP>:8001/api/v1/clustering/results"
+```
+
+**Response:**
+```json
+{
+  "execution_date": "2025-12-05T18:05:00Z",
+  "metrics": {
+    "silhouette_score": 0.45,
+    "total_users": 25,
+    "high_risk_percentage": 12.0
+  },
+  "risk_distribution": {
+    "ALTO_RIESGO": 3,
+    "RIESGO_MODERADO": 7,
+    "BAJO_RIESGO": 15
+  }
+}
+```
+
+### GET `/clustering/users/{risk_level}`
+Lista de usuarios por nivel de riesgo.
+
+```bash
+curl "http://<IP>:8001/api/v1/clustering/users/ALTO_RIESGO"
+```
+
+**Valores válidos:** `ALTO_RIESGO`, `RIESGO_MODERADO`, `BAJO_RIESGO`
+
+**Response:**
 ```json
 [
   {
-    "user_id_raiz": "uuid-del-usuario",
+    "user_id_raiz": "uuid-123",
     "risk_level": "ALTO_RIESGO",
-    "severity_index": 0.75,
+    "severity_index": 0.85,
     "total_votes": 3
   }
 ]
 ```
 
+### GET `/clustering/profiles`
+Perfil promedio de KPIs por cluster.
+
+```bash
+curl "http://<IP>:8001/api/v1/clustering/profiles"
+```
+
 ---
 
-## 🤖 Endpoint para Chat con IA
+## 5️⃣ Endpoint para Chat IA
 
-```
-GET /api/v1/clustering/user-profile/{user_id}
+### GET `/clustering/user-profile/{user_id}`
+Perfil de riesgo de un usuario específico.
+
+```bash
+curl "http://<IP>:8001/api/v1/clustering/user-profile/uuid-del-usuario"
 ```
 
-**Respuesta:**
+**Response:**
 ```json
 {
-  "user_id": "uuid",
+  "user_id": "uuid-123",
   "risk_level": "ALTO_RIESGO",
   "severity_index": 0.68,
   "kpis": {
@@ -107,59 +204,47 @@ GET /api/v1/clustering/user-profile/{user_id}
     "participacion_comunitaria": 0.1
   },
   "has_data": true,
-  "recommendation_context": "⚠️ Usuario identificado en ALTO RIESGO emocional. Responde con máxima empatía..."
+  "recommendation_context": "⚠️ Usuario en ALTO RIESGO emocional..."
 }
 ```
 
 ---
 
-## 🔄 Flujo ETL + Clustering
+## 🔧 Integración con Frontend
 
-### 1. Ejecutar ETL (Extrae datos de todas las DBs)
-```bash
-curl -X POST "http://localhost:8001/api/v1/data-miner/execute-etl?skip_nlp=false"
+### Opción 1: Embeber Dashboard (iframe)
+```html
+<iframe 
+  src="http://<IP>:8001/api/v1/clustering/visualize/dashboard" 
+  width="100%" 
+  height="800px"
+  frameborder="0">
+</iframe>
 ```
 
-### 2. Ejecutar Clustering (Clasifica usuarios)
-```bash
-curl -X POST "http://localhost:8001/api/v1/clustering/execute?n_clusters=4"
-```
+### Opción 2: Consumir API JSON
+```javascript
+// Ejemplo con fetch
+const response = await fetch('http://<IP>:8001/api/v1/clustering/results');
+const data = await response.json();
 
-### 3. Ver Dashboard
-```
-http://localhost:8001/api/v1/clustering/visualize/dashboard
+// Usar data.risk_distribution para crear gráficas con Chart.js, etc.
 ```
 
 ---
 
-## 📊 KPIs Calculados
+## 📅 Flujo Recomendado
 
-| KPI | Descripción | Señal de Riesgo |
-|-----|-------------|-----------------|
-| Ratio Reciprocidad | followers/following | Bajo = Aislamiento |
-| Días Inactivo | Desde última conexión | Alto = Retirada |
-| Mensajes Nocturnos | % mensajes 1-5am | Alto = Trastorno sueño |
-| Apatía Perfil | Bio/perfil incompleto | Alto = Desinterés |
-| Negatividad NLP | Sentimiento contenido | Alto = Estado negativo |
-| Participación | Comunidades activas | Bajo = Poca red apoyo |
+1. **Ejecutar ETL** → `POST /data-miner/execute-etl`
+2. **Ejecutar Clustering** → `POST /clustering/execute`
+3. **Ver Dashboard** → `GET /clustering/visualize/dashboard`
+4. **Consultar usuarios alto riesgo** → `GET /clustering/users/ALTO_RIESGO`
 
 ---
 
-## 🗄️ Bases de Datos Conectadas
+## 🔒 Puerto AWS Security Group
 
-| DB | Propósito |
-|----|-----------|
-| `aura_auth` | Datos de usuarios |
-| `aura_social` | Posts, perfiles, comunidades |
-| `aura_messaging` | Mensajes, última conexión |
-| `aura_data_miner` | **Vectores de características** (output) |
-
----
-
-## 📅 Recomendación de Ejecución
-
-| Proceso | Frecuencia | Descripción |
-|---------|-----------|-------------|
-| ETL Completo | Cada 6-12 horas | Actualiza vectores |
-| Clustering | Después del ETL | Recalcula riesgos |
-| Consulta en vivo | Por mensaje | `/user-profile/{id}` |
+Agregar regla Inbound en EC2 Security Group:
+- **Type:** Custom TCP
+- **Port:** 8001
+- **Source:** 0.0.0.0/0 (o IP específica)
