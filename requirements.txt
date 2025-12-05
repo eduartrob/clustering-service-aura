@@ -14,11 +14,13 @@ numpy==1.26.2
 scikit-learn==1.3.2
 matplotlib>=3.8.0
 
-# NLP / Análisis de Sentimiento
+# NLP / Análisis de Sentimiento (CPU-only para servidores sin GPU)
 transformers==4.35.2
-torch>=2.2.0
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.2.0+cpu
 sentencepiece==0.1.99
 
 # Utilidades
 pydantic==2.5.2
 pydantic-settings==2.1.0
+
