@@ -12,6 +12,7 @@ from app.database.models import Base
 from app.database.connection import analytics_engine
 from app.api.routes import router as etl_router
 from app.api.clustering_routes import router as clustering_router
+from app.api.chat_routes import router as chat_router
 
 # Cargar variables de entorno
 load_dotenv()
@@ -78,8 +79,11 @@ para generar el **Vector de Características del Usuario** necesario para el Clu
 
 * `POST /api/v1/clustering/execute` - Ejecutar ensamble de clustering
 * `GET /api/v1/clustering/visualize/dashboard` - Dashboard completo con gráficos SVG
-* `GET /api/v1/clustering/visualize/scatter` - Scatter plot PCA
-* `GET /api/v1/clustering/visualize/distribution` - Distribución de riesgo
+
+### 🤖 Chat con IA
+
+* `POST /api/v1/chat/send` - Enviar mensaje al chat de IA (Gemini)
+* `GET /api/v1/chat/status` - Estado del servicio de chat
     """,
     version="1.0.0",
     lifespan=lifespan,
@@ -99,6 +103,7 @@ app.add_middleware(
 # Registrar routers
 app.include_router(etl_router)
 app.include_router(clustering_router)
+app.include_router(chat_router)
 
 
 @app.get("/", tags=["Root"])
