@@ -1,250 +1,399 @@
-# AURA Clustering Service - API Documentation
+# 🚀 AURA Clustering Service - Data Miner ETL
 
-## 🔐 Credenciales Admin
-```
-Email:    admin@aura.com
-Usuario:  admin
-Password: pezcadofrito.1
-```
+> **Microservicio de Minería de Datos para Detección de Riesgos Psicoemocionales**  
+> **Tecnologías:** Python 3.11+, FastAPI, SQLAlchemy, PostgreSQL, Transformers (NLP), WebSockets
 
-## 🌐 Puerto y Acceso
-```
-Puerto: 8001
-URL Base: http://<IP-EC2>:8001
-Swagger: http://<IP-EC2>:8001/docs
-```
-
-> **⚠️ Importante:** Abrir puerto 8001 en Security Groups de AWS EC2 (TCP Inbound)
+API REST con FastAPI para la ejecución del flujo **ETL (Extract, Transform, Load)** que genera el **Vector de Características del Usuario** para Clustering de detección de riesgos en poblaciones juveniles.
 
 ---
 
-## 📊 API Endpoints para Admin Frontend
+## 📑 Tabla de Contenidos
 
-### Base URL
-```
-http://<IP-EC2>:8001/api/v1
-```
+1. [Quick Start](#-quick-start)
+2. [Estructura del Proyecto](#-estructura-del-proyecto)
+3. [Variables de Entorno](#-variables-de-entorno)
+4. [Endpoints API](#-endpoints-api)
+5. [KPIs Calculados](#-kpis-calculados)
+6. [Módulo de Clustering](#-módulo-de-clustering)
+7. [Sistema en Tiempo Real (v2)](#-sistema-en-tiempo-real-v2)
+8. [Configuración de Base de Datos](#-configuración-de-base-de-datos)
+9. [Lógica ETL](#-lógica-etl)
+10. [Análisis de Sentimiento NLP](#-análisis-de-sentimiento-nlp)
 
 ---
 
-## 1️⃣ ETL - Ejecutar Pipeline (Requisito Previo)
-
-### POST `/data-miner/execute-etl`
-Extrae datos de todas las DBs y genera vectores de características.
+## 🚀 Quick Start
 
 ```bash
-curl -X POST "http://<IP>:8001/api/v1/data-miner/execute-etl?skip_nlp=false"
+# 1. Crear entorno virtual
+python3 -m venv .venv
+source .venv/bin/activate  # Linux/macOS
+
+# 2. Instalar dependencias
+pip install -r requirements.txt
+
+# 3. Crear la base de datos
+sudo -u postgres psql -c "CREATE DATABASE aura_data_miner;"
+
+# 4. Configurar permisos
+sudo -u postgres psql -c "CREATE USER miner_user WITH PASSWORD 'miner_password';"
+sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE aura_data_miner TO miner_user;"
+sudo -u postgres psql -c "ALTER DATABASE aura_data_miner OWNER TO miner_user;"
+
+# 5. Ejecutar migraciones
+alembic upgrade head
+
+# 6. Iniciar el servicio
+uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
 ```
 
-**Response:**
-```json
-{
-  "status": "success",
-  "message": "Flujo ETL de Vectorización completado con éxito.",
-  "records_processed": 25,
-  "extraction_date": "2025-12-05T18:00:00Z",
-  "next_step": "La tabla 'user_feature_vector' está lista para el algoritmo de Clustering."
-}
+### 📚 Documentación Interactiva
+
+- **Swagger UI:** http://localhost:8001/docs
+- **ReDoc:** http://localhost:8001/redoc
+
+---
+
+## 🏗️ Estructura del Proyecto
+
+```
+clustering-service-aura/
+├── .venv/                          # Entorno virtual
+├── .env                            # Variables de entorno
+├── requirements.txt                # Dependencias Python
+├── alembic.ini                     # Configuración de Alembic
+├── alembic/                        # Migraciones de base de datos
+│   ├── versions/
+│   └── env.py
+├── app/
+│   ├── __init__.py
+│   ├── main.py                     # Punto de entrada FastAPI
+│   ├── config.py                   # Configuración centralizada
+│   ├── database/
+│   │   ├── connection.py           # Conexiones SQLAlchemy
+│   │   └── models.py               # Modelos (UserFeatureVector)
+│   ├── etl/
+│   │   ├── extractor.py            # Fase E: Extracción
+│   │   ├── transformer.py          # Fase T: Transformación
+│   │   └── loader.py               # Fase L: Carga
+│   ├── clustering/
+│   │   ├── ensemble.py             # Ensamble K-Means + DBSCAN + IsolationForest
+│   │   └── visualizer.py           # Generador de gráficos SVG
+│   ├── nlp/
+│   │   └── sentiment_analyzer.py   # Análisis de sentimiento con Transformers
+│   ├── realtime/                   # NUEVO: Módulo de tiempo real
+│   │   ├── websocket_manager.py    # Gestor de conexiones WebSocket
+│   │   ├── db_listener.py          # PostgreSQL LISTEN/NOTIFY (CDC)
+│   │   └── streaming_pipeline.py   # ETL incremental
+│   └── api/
+│       ├── routes.py               # Endpoints ETL (v1)
+│       ├── clustering_routes.py    # Endpoints Clustering (v1)
+│       └── websocket_routes.py     # Endpoints WebSocket + JSON (v2)
+└── sql/
+    └── triggers/
+        └── notify_triggers.sql     # Triggers para CDC
 ```
 
 ---
 
-## 2️⃣ Clustering - Ejecutar Análisis
+## ⚙️ Variables de Entorno
 
-### POST `/clustering/execute`
-Ejecuta K-Means, DBSCAN e Isolation Forest.
+Crear archivo `.env` en la raíz del proyecto:
 
-```bash
-curl -X POST "http://<IP>:8001/api/v1/clustering/execute?n_clusters=4"
-```
+```env
+# Base de Datos Analítica (Target)
+DATABASE_URL_ANALYTICS=postgresql://postgres:postgres@localhost:5432/aura_data_miner
 
-**Parámetros:**
-- `n_clusters` (int, default=4): Número de clusters
-- `contamination` (float, default=0.1): Proporción de anomalías
+# Bases de Datos Fuente (Source) - Solo lectura
+DATABASE_URL_AUTH=postgresql://postgres:postgres@localhost:5432/aura_auth
+DATABASE_URL_SOCIAL=postgresql://postgres:postgres@localhost:5432/aura_social
+DATABASE_URL_MESSAGING=postgresql://postgres:postgres@localhost:5432/aura_messaging
 
-**Response:**
-```json
-{
-  "status": "success",
-  "execution_date": "2025-12-05T18:05:00Z",
-  "total_users": 25,
-  "risk_distribution": {
-    "ALTO_RIESGO": 3,
-    "RIESGO_MODERADO": 7,
-    "BAJO_RIESGO": 15
-  },
-  "metrics": {
-    "silhouette_score": 0.45,
-    "calinski_harabasz": 120.5,
-    "high_risk_percentage": 12.0
-  }
-}
+# Configuración del Servicio
+SERVICE_NAME=clustering-service-aura
+SERVICE_PORT=8001
+DEBUG=True
+
+# Modelo NLP (Análisis de sentimiento en español)
+NLP_MODEL_NAME=UMUTeam/roberta-spanish-sentiment-analysis
 ```
 
 ---
 
-## 3️⃣ Visualizaciones (HTML/SVG)
+## 🔗 Endpoints API
 
-### GET `/clustering/visualize/dashboard`
-Dashboard completo con todas las gráficas.
-```
-http://<IP>:8001/api/v1/clustering/visualize/dashboard
-```
-**Retorna:** HTML con CSS inline (puede embeberse en iframe)
+### API v1 - Pipeline ETL y Clustering
 
-### GET `/clustering/visualize/distribution`
-Gráfico de barras: Distribución de niveles de riesgo.
-```
-http://<IP>:8001/api/v1/clustering/visualize/distribution
-```
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| GET | `/api/v1/data-miner/status` | Estado del servicio |
+| POST | `/api/v1/data-miner/execute-etl` | Ejecutar pipeline ETL |
+| POST | `/api/v1/data-miner/execute-etl-async` | ETL en background |
+| GET | `/api/v1/data-miner/feature-vector/count` | Conteo de registros |
+| POST | `/api/v1/clustering/execute` | Ejecutar Clustering |
+| GET | `/api/v1/clustering/results` | Resultados del clustering |
+| GET | `/api/v1/clustering/visualize/dashboard` | Dashboard SVG completo |
+| GET | `/api/v1/clustering/visualize/scatter` | Scatter Plot PCA |
+| GET | `/api/v1/clustering/visualize/distribution` | Distribución de riesgo |
+| GET | `/api/v1/clustering/visualize/radar` | Radar Chart de Clusters |
+| GET | `/api/v1/clustering/users/{risk_level}` | Usuarios por nivel de riesgo |
 
-### GET `/clustering/visualize/scatter`
-Scatter Plot PCA coloreado por nivel de riesgo.
-```
-http://<IP>:8001/api/v1/clustering/visualize/scatter
-```
+### API v2 - Tiempo Real (WebSocket + ChartJS)
 
-### GET `/clustering/visualize/radar`
-Radar Chart con perfil de KPIs por cluster.
-```
-http://<IP>:8001/api/v1/clustering/visualize/radar
-```
-
-### GET `/clustering/visualize/severity`
-Histograma de índice de severidad.
-```
-http://<IP>:8001/api/v1/clustering/visualize/severity
-```
-
-### GET `/clustering/visualize/kmeans`
-Visualización de clusters K-Means.
-```
-http://<IP>:8001/api/v1/clustering/visualize/kmeans
-```
+| Tipo | Endpoint | Descripción |
+|------|----------|-------------|
+| WebSocket | `/api/v2/clustering/ws/live` | Actualizaciones en tiempo real |
+| WebSocket | `/api/v2/clustering/ws/alerts` | Alertas críticas |
+| GET | `/api/v2/clustering/data/distribution` | JSON para ChartJS (Bar/Pie) |
+| GET | `/api/v2/clustering/data/scatter` | JSON para ChartJS (Scatter) |
+| GET | `/api/v2/clustering/data/radar` | JSON para ChartJS (Radar) |
+| GET | `/api/v2/clustering/data/severity-histogram` | Histograma de severidad |
+| GET | `/api/v2/clustering/data/kpi-trends?hours=24` | Tendencias temporales |
+| GET | `/api/v2/clustering/data/high-risk-users` | Usuarios en alto riesgo |
+| GET | `/api/v2/clustering/status` | Estado del sistema real-time |
 
 ---
 
-## 4️⃣ Datos JSON para Frontend Personalizado
+## 📊 KPIs Calculados
 
-### GET `/clustering/results`
-Métricas del último clustering.
+El sistema calcula 6 indicadores clave de riesgo psicoemocional:
 
-```bash
-curl "http://<IP>:8001/api/v1/clustering/results"
-```
-
-**Response:**
-```json
-{
-  "execution_date": "2025-12-05T18:05:00Z",
-  "metrics": {
-    "silhouette_score": 0.45,
-    "total_users": 25,
-    "high_risk_percentage": 12.0
-  },
-  "risk_distribution": {
-    "ALTO_RIESGO": 3,
-    "RIESGO_MODERADO": 7,
-    "BAJO_RIESGO": 15
-  }
-}
-```
-
-### GET `/clustering/users/{risk_level}`
-Lista de usuarios por nivel de riesgo.
-
-```bash
-curl "http://<IP>:8001/api/v1/clustering/users/ALTO_RIESGO"
-```
-
-**Valores válidos:** `ALTO_RIESGO`, `RIESGO_MODERADO`, `BAJO_RIESGO`
-
-**Response:**
-```json
-[
-  {
-    "user_id_raiz": "uuid-123",
-    "risk_level": "ALTO_RIESGO",
-    "severity_index": 0.85,
-    "total_votes": 3
-  }
-]
-```
-
-### GET `/clustering/profiles`
-Perfil promedio de KPIs por cluster.
-
-```bash
-curl "http://<IP>:8001/api/v1/clustering/profiles"
-```
+| KPI | Nombre | Indicador de Riesgo |
+|:---:|:-------|:--------------------|
+| 1 | **Ratio de Reciprocidad Social** | Aislamiento (sigue a muchos sin ser seguido) |
+| 2 | **Días desde Última Conexión** | Abandono/retiro de la plataforma |
+| 3 | **Ratio de Mensajes Nocturnos** | Desorden circadiano (insomnio, ansiedad) |
+| 4 | **Índice de Apatía del Perfil** | Perfil incompleto = anhedonia |
+| 5 | **Índice de Negatividad (NLP)** | Depresión, crisis emocional |
+| 6 | **Densidad Comunitaria** | Red de apoyo limitada |
 
 ---
 
-## 5️⃣ Endpoint para Chat IA
+## 🔮 Módulo de Clustering
 
-### GET `/clustering/user-profile/{user_id}`
-Perfil de riesgo de un usuario específico.
+### Sistema de Votación (Ensemble)
 
-```bash
-curl "http://<IP>:8001/api/v1/clustering/user-profile/uuid-del-usuario"
+El sistema usa 3 algoritmos que votan independientemente:
+
+1. **K-Means** → Identifica cluster con peor perfil de KPIs
+2. **DBSCAN** → Detecta outliers estadísticos
+3. **Isolation Forest** → Detecta anomalías comportamentales
+
+**Regla de decisión:**
+- ≥2 votos → 🔴 **ALTO RIESGO** (Intervención prioritaria)
+- 1 voto → 🟡 **RIESGO MODERADO** (Monitoreo)
+- 0 votos → 🟢 **BAJO RIESGO** (Normal)
+
+### Índice de Severidad de Anomalía (ASI)
+
+```
+ASI = 0.5×(1-Score_IsolationForest) + 0.3×(Outlier_DBSCAN) + 0.2×(Distancia_Centroide)
 ```
 
-**Response:**
-```json
-{
-  "user_id": "uuid-123",
-  "risk_level": "ALTO_RIESGO",
-  "severity_index": 0.68,
-  "kpis": {
-    "reciprocidad_social": 0.15,
-    "dias_inactivo": 12,
-    "mensajes_nocturnos": 0.45,
-    "apatia_perfil": 0.8,
-    "negatividad": 0.72,
-    "participacion_comunitaria": 0.1
-  },
-  "has_data": true,
-  "recommendation_context": "⚠️ Usuario en ALTO RIESGO emocional..."
-}
-```
+Escala de 0-100 para priorizar intervención.
 
 ---
 
-## 🔧 Integración con Frontend
+## 🚀 Sistema en Tiempo Real (v2)
 
-### Opción 1: Embeber Dashboard (iframe)
-```html
-<iframe 
-  src="http://<IP>:8001/api/v1/clustering/visualize/dashboard" 
-  width="100%" 
-  height="800px"
-  frameborder="0">
-</iframe>
+### Arquitectura
+
+```
+[Microservicios AURA] → [PostgreSQL Trigger] → [pg_notify]
+         ↓
+[DatabaseListener] → [StreamingETLPipeline] → [WebSocketManager]
+         ↓
+[Clientes React/ChartJS]
 ```
 
-### Opción 2: Consumir API JSON
+### Activar Triggers SQL
+
+Ejecutar en las bases de datos de los microservicios:
+
+```bash
+# aura_messaging
+psql -U postgres -d aura_messaging -f sql/triggers/notify_triggers.sql
+
+# aura_social
+psql -U postgres -d aura_social -f sql/triggers/notify_triggers.sql
+```
+
+### Conectar desde React
+
 ```javascript
-// Ejemplo con fetch
-const response = await fetch('http://<IP>:8001/api/v1/clustering/results');
-const data = await response.json();
+// WebSocket para actualizaciones en vivo
+const ws = new WebSocket('ws://localhost:8001/api/v2/clustering/ws/live');
 
-// Usar data.risk_distribution para crear gráficas con Chart.js, etc.
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  
+  if (data.type === 'USER_RISK_UPDATE') {
+    // Actualizar gráfica ChartJS
+    updateChart(data.payload);
+  }
+  
+  if (data.type === 'CRITICAL_ALERT') {
+    // Mostrar notificación
+    showAlert(data.payload);
+  }
+};
+
+// Obtener datos para ChartJS
+const response = await fetch('/api/v2/clustering/data/distribution');
+const chartData = await response.json();
+// chartData ya está en formato compatible con ChartJS
 ```
 
 ---
 
-## 📅 Flujo Recomendado
+## 💾 Configuración de Base de Datos
 
-1. **Ejecutar ETL** → `POST /data-miner/execute-etl`
-2. **Ejecutar Clustering** → `POST /clustering/execute`
-3. **Ver Dashboard** → `GET /clustering/visualize/dashboard`
-4. **Consultar usuarios alto riesgo** → `GET /clustering/users/ALTO_RIESGO`
+### Crear Base de Datos Analítica
+
+```sql
+CREATE DATABASE aura_data_miner;
+```
+
+### Ejecutar Migraciones
+
+```bash
+# Generar migración automática
+alembic revision --autogenerate -m "create_user_feature_vector_table"
+
+# Aplicar migración
+alembic upgrade head
+```
+
+### Modelo de Datos: `user_feature_vector`
+
+| Campo | Tipo | Descripción |
+|:------|:-----|:------------|
+| `id` | SERIAL | Clave primaria |
+| `user_id_raiz` | UUID | ID del usuario (Auth Service) |
+| `extraction_date` | TIMESTAMP | Fecha del ETL |
+| `reciprocity_ratio_norm` | FLOAT | KPI 1 normalizado |
+| `days_since_last_seen_norm` | FLOAT | KPI 2 normalizado |
+| `ratio_night_messages` | FLOAT | KPI 3 |
+| `is_profile_incomplete` | BOOLEAN | KPI 4 |
+| `sentiment_negativity_index` | FLOAT | KPI 5 (NLP) |
+| `num_community_categories_norm` | FLOAT | KPI 6 normalizado |
+| `cluster_label` | VARCHAR | Resultado del clustering |
 
 ---
 
-## 🔒 Puerto AWS Security Group
+## 🔄 Lógica ETL
 
-Agregar regla Inbound en EC2 Security Group:
-- **Type:** Custom TCP
-- **Port:** 8001
-- **Source:** 0.0.0.0/0 (o IP específica)
+### Fase E: Extracción (`app/etl/extractor.py`)
+
+Extrae datos de 3 bases de datos:
+- **aura_auth**: Usuarios base
+- **aura_social**: Perfiles, posts, comentarios, comunidades
+- **aura_messaging**: Mensajes, última conexión
+
+### Fase T: Transformación (`app/etl/transformer.py`)
+
+1. Unificación de datasets (merge por user_id)
+2. Cálculo de los 6 KPIs
+3. Análisis NLP de sentimiento
+4. Normalización con MinMaxScaler
+
+### Fase L: Carga (`app/etl/loader.py`)
+
+Inserta los vectores de características en `user_feature_vector` usando pandas `to_sql` con inserción masiva.
+
+---
+
+## 🧠 Análisis de Sentimiento NLP
+
+### Modelo Utilizado
+
+**UMUTeam/roberta-spanish-sentiment-analysis** - RoBERTa fine-tuned para español.
+
+### Proceso
+
+1. Extrae textos (posts, comentarios, mensajes) por usuario
+2. Tokeniza y procesa con el modelo Transformer
+3. Calcula probabilidad de sentimiento negativo
+4. Promedia por usuario → `sentiment_negativity_index`
+
+### Optimización GPU
+
+```bash
+# Para acelerar inferencia con CUDA
+pip install torch --index-url https://download.pytorch.org/whl/cu121
+```
+
+---
+
+## 📊 Flujo de Datos Completo
+
+```mermaid
+flowchart TD
+    subgraph Sources["🗄️ Bases de Datos Fuente"]
+        AUTH[(aura_auth)]
+        SOCIAL[(aura_social)]
+        MSG[(aura_messaging)]
+    end
+    
+    subgraph ETL["🔄 Pipeline ETL"]
+        E[📥 Extractor]
+        T[🔄 Transformer]
+        NLP[🧠 NLP Analyzer]
+        L[📤 Loader]
+    end
+    
+    subgraph Clustering["🔮 Clustering Ensemble"]
+        KMEANS[K-Means]
+        DBSCAN[DBSCAN]
+        ISO[Isolation Forest]
+        VOTE[Votación]
+    end
+    
+    subgraph Output["📊 Salidas"]
+        SVG[Dashboard SVG]
+        WS[WebSocket Live]
+        JSON[API JSON v2]
+    end
+    
+    AUTH --> E
+    SOCIAL --> E
+    MSG --> E
+    
+    E --> T
+    T <--> NLP
+    T --> L
+    
+    L --> KMEANS
+    L --> DBSCAN
+    L --> ISO
+    
+    KMEANS --> VOTE
+    DBSCAN --> VOTE
+    ISO --> VOTE
+    
+    VOTE --> SVG
+    VOTE --> WS
+    VOTE --> JSON
+```
+
+---
+
+## 🔒 Consideraciones de Seguridad
+
+> **Importante:**
+> - Las credenciales de las DBs fuente deben tener permisos de **solo lectura**
+> - Nunca hardcodear contraseñas en el código
+> - En producción, usar secrets managers (AWS Secrets Manager, HashiCorp Vault)
+
+---
+
+## 📝 Próximas Mejoras
+
+- [ ] Scheduler con Celery + Redis para ETL periódico
+- [ ] Logging estructurado con `structlog`
+- [ ] Health checks para Prometheus/Grafana
+- [ ] Autenticación JWT para endpoints WebSocket
+
+---
+
+*Microservicio desarrollado para el proyecto AURA - Sistema de Detección de Riesgos Psicoemocionales en Poblaciones Juveniles*
