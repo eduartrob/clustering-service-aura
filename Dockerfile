@@ -1,6 +1,8 @@
+# syntax=docker/dockerfile:1.4
 # ================================
 # AURA Data Mining - Clustering Service
 # ETL + Real-time WebSocket + NLP
+# OPTIMIZED: BuildKit cache mounts + shared NLP models
 # ================================
 
 FROM python:3.11-slim
@@ -9,9 +11,11 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Environment variables
+# NOTE: Removed PIP_NO_CACHE_DIR to enable caching
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1
+    TRANSFORMERS_CACHE=/models \
+    HF_HOME=/models
 
 # Install system dependencies for psycopg2, ML libraries and NLP
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -24,11 +28,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy requirements first (for Docker layer caching)
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies with BuildKit cache mount
+# This caches pip downloads between builds, saving ~2GB on rebuilds
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip && \
+    pip install -r requirements.txt
 
-# Pre-download NLP model for sentiment analysis (Spanish)
-RUN python -c "from transformers import pipeline; pipeline('sentiment-analysis', model='pysentimiento/robertuito-sentiment-analysis')" || true
+# NOTE: NLP model is NOT downloaded during build anymore
+# It will be loaded from the shared /models volume at runtime
+# This saves ~2GB per build and shares the model with chatbot-service
 
 # Copy application code
 COPY . .
